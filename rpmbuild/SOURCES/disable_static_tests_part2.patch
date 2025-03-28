@@ -1,0 +1,13 @@
+diff --git a/src/cmd/dist/test.go b/src/cmd/dist/test.go
+index 9f26606..2408505 100644
+--- a/src/cmd/dist/test.go
++++ b/src/cmd/dist/test.go
+@@ -1259,7 +1259,7 @@ func (t *tester) registerCgoTests() {
+ 			} else {
+ 				panic("unknown linkmode with static build: " + linkmode)
+ 			}
+-			gt.tags = append(gt.tags, "static")
++			gt.tags = append(gt.tags, "static", "no_openssl")
+ 		}
+ 
+ 		t.registerTest("cgo:"+name, "../misc/cgo/test", gt, opts...)
