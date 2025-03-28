@@ -1,6 +1,7 @@
 %undefine _missing_build_ids_terminate_build
 
-%global bcond_with strict_fips
+%bcond_with strict_fips
+%bcond_with ignore_tests
 
 # build ids are not currently generated:
 # https://code.google.com/p/go/issues/detail?id=5238
@@ -71,12 +72,8 @@
 %global shared 0
 %endif
 
-# Pre build std lib with -race enabled
-%ifarch x86_64
-%global race 1
-%else
+# Disabled due to 1.20 new cache usage, see 1.20 upstream release notes
 %global race 0
-%endif
 
 %ifarch x86_64
 %global gohostarch  amd64
@@ -97,28 +94,35 @@
 %global gohostarch  s390x
 %endif
 
-%global go_api 1.18
-%global go_version 1.18.9
+%global go_api 1.20
+%global version 1.20.12
 %global pkg_release 1
 
 Name:           golang
-Version:        %{go_version}
+Version:        %{version}
 Release:        2%{?dist}
+
 Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD and Public Domain
 URL:            http://golang.org/
+Source0:        go%{version}.tar.gz
+# Go's FIPS mode bindings are now provided as a standalone
+# module instead of in tree.  This makes it easier to see
+# the actual changes vs upstream Go.  The module source is
+# located at https://github.com/golang-fips/openssl-fips,
+# And pre-genetated patches to set up the module for a given
+# Go release are located at https://github.com/golang-fips/go.
+Source1:       go%{version}-%{pkg_release}-openssl-fips.tar.gz
 # make possible to override default traceback level at build time by setting build tag rpm_crashtraceback
-Source0:        go%{go_version}-%{pkg_release}-openssl-fips.tar.gz
-
-Source1:        fedora.go
+Source2:        fedora.go
 
 # The compiler is written in Go. Needs go(1.4+) compiler for build.
 # Actual Go based bootstrap compiler provided by above source.
 %if !%{golang_bootstrap}
 BuildRequires:  gcc-go >= 5
 %else
-BuildRequires:  golang
+BuildRequires:  golang >= 1.17.13
 %endif
 %if 0%{?rhel} > 6 || 0%{?fedora} > 0
 BuildRequires:  hostname
@@ -140,28 +144,28 @@ Requires:       %{name}-src = %{version}-%{release}
 Requires:       openssl-devel
 Requires:       diffutils
 
-# we had been just removing the zoneinfo.zip, but that caused tests to fail for users that 
-# later run `go test -a std`. This makes it only use the zoneinfo.zip where needed in tests.
-Patch215:       go1.5-zoneinfo_testing_only.patch
 
 # Proposed patch by jcajka https://golang.org/cl/86541
 Patch221:       fix_TestScript_list_std.patch
+Patch222:      skip-test-overlong-message.patch
 
-# static linking of dlopen is unsupported
-Patch226:      disable_static_external_tests.patch
+Patch1939923:   skip_test_rhbz1939923.patch
 
-Patch223: remove_ed25519vectors_test.patch
+Patch2:        disable_static_tests_part1.patch
+Patch3:        disable_static_tests_part2.patch
 
-Patch227: cmd-link-use-correct-path-for-dynamic-loader-on-ppc6.patch
-
-Patch228: do-not-reuse-far-trampolines.patch
-Patch229: big-endian.patch
+%if 0%{?rhel} == 7
+Patch64:       skip_ppc64le_cgo_inline_plt.patch
+%endif
 
 # Having documentation separate was broken
 Obsoletes:      %{name}-docs < 1.1-4
 
 # RPM can't handle symlink -> dir with subpackages, so merge back
 Obsoletes:      %{name}-data < 1.1.1-4
+
+# We don't build golang-race anymore, rhbz#2230599
+Obsoletes:      golang-race < 1.20.0
 
 # These are the only RHEL/Fedora architectures that we compile this package for
 ExclusiveArch:  %{golang_arches}
@@ -247,17 +251,34 @@ Requires:       %{name} = %{version}-%{release}
 %endif
 
 %prep
-%setup -q -n go-go%{go_version}-%{pkg_release}-openssl-fips
+%setup -q -n go-go%{version}
 
-%patch215 -p1
+pushd ..
+tar -xf %{SOURCE1}
+popd
+patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/000-initial-setup.patch
+patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/001-initial-openssl-for-fips.patch
+patch -p1 < ../go-go%{version}-%{pkg_release}-openssl-fips/patches/002-strict-fips-runtime-detection.patch
+
+# Configure crypto tests
+pushd ../go-go%{version}-%{pkg_release}-openssl-fips
+ln -s ../go-go%{version} go
+./scripts/configure-crypto-tests.sh
+popd
+
+%patch2 -p1
+%patch3 -p1
+
+%if 0%{?rhel} == 7
+%patch64 -p1
+%endif
+
 %patch221 -p1
-%patch223 -p1
-%patch226 -p1
-%patch227 -p1
-%patch228 -p1
-%patch229 -p1
+%patch222 -p1
 
-cp %{SOURCE1} ./src/runtime/
+%patch1939923 -p1
+
+cp %{SOURCE2} ./src/runtime/
 
 %build
 set -xe
@@ -339,12 +360,11 @@ cwd=$(pwd)
 src_list=$cwd/go-src.list
 pkg_list=$cwd/go-pkg.list
 shared_list=$cwd/go-shared.list
-race_list=$cwd/go-race.list
 misc_list=$cwd/go-misc.list
 docs_list=$cwd/go-docs.list
 tests_list=$cwd/go-tests.list
-rm -f $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list $race_list
-touch $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list $race_list
+rm -f $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list
+touch $src_list $pkg_list $docs_list $misc_list $tests_list $shared_list
 pushd $RPM_BUILD_ROOT%{goroot}
     find src/ -type d -a \( ! -name testdata -a ! -ipath '*/testdata/*' \) -printf '%%%dir %{goroot}/%p\n' >> $src_list
     find src/ ! -type d -a \( ! -ipath '*/testdata/*' -a ! -name '*_test*.go' \) -printf '%{goroot}/%p\n' >> $src_list
@@ -373,13 +393,6 @@ pushd $RPM_BUILD_ROOT%{goroot}
     
     find pkg/*_dynlink/ -type d -printf '%%%dir %{goroot}/%p\n' >> $shared_list
     find pkg/*_dynlink/ ! -type d -printf '%{goroot}/%p\n' >> $shared_list
-%endif
-
-%if %{race}
-
-    find pkg/*_race/ -type d -printf '%%%dir %{goroot}/%p\n' >> $race_list
-    find pkg/*_race/ ! -type d -printf '%{goroot}/%p\n' >> $race_list
-
 %endif
 
     find test/ -type d -printf '%%%dir %{goroot}/%p\n' >> $tests_list
@@ -449,7 +462,7 @@ export CGO_ENABLED=0
 %endif
 
 # make sure to not timeout
-export GO_TEST_TIMEOUT_SCALE=10
+export GO_TEST_TIMEOUT_SCALE=2
 
 export GO_TEST_RUN=""
 %ifarch aarch64
@@ -460,21 +473,20 @@ export GO_TEST_RUN=""
 
 # TestEd25519Vectors needs network connectivity but it should be cover by
 # this test https://pkgs.devel.redhat.com/cgit/tests/golang/tree/Regression/internal-testsuite/runtest.sh#n127
-export DISABLE_Ed25519_TEST="-run=!^TestEd25519Vectors$"
 
-./run.bash --no-rebuild -v -v -v -k $GO_TEST_RUN $DISABLE_Ed25519_TEST
+./run.bash --no-rebuild -v -v -v -k $GO_TEST_RUN
 
 # Run tests with FIPS enabled.
 export GOLANG_FIPS=1
 pushd crypto
   # Run all crypto tests but skip TLS, we will run FIPS specific TLS tests later
-  go test $(go list ./... | grep -v tls) -v $DISABLE_Ed25519_TEST
+  go test $(go list ./... | grep -v tls) -v
   # Check that signature functions have parity between boring and notboring
-  CGO_ENABLED=0 go test $(go list ./... | grep -v tls) -v $DISABLE_Ed25519_TEST
+  CGO_ENABLED=0 go test $(go list ./... | grep -v tls) -v
 popd
 # Run all FIPS specific TLS tests
 pushd crypto/tls
-  go test -v -run "Boring" $DISABLE_Ed25519_TEST
+  go test -v -run "Boring"
 popd
 %else
 ./run.bash --no-rebuild -v -v -v -k || :
@@ -483,7 +495,7 @@ cd ..
 
 %files
 
-%doc AUTHORS CONTRIBUTORS LICENSE PATENTS
+%doc LICENSE PATENTS
 # VERSION has to be present in the GOROOT, for `go install std` to work
 %doc %{goroot}/VERSION
 %dir %{goroot}/doc
@@ -535,13 +547,38 @@ cd ..
 %files -f go-shared.list shared
 %endif
 
-%if %{race}
-%files -f go-race.list race
-%endif
-
 %changelog
-* Sat Mar 29 2025 Thien Nguyen <nthien86@gmail.com> - 1.18.9-2
+* Sat Mar 29 2025 Thien Nguyen <nthien86@gmail.com> - 1.20.12-2
 - Disable failure on tests
+
+* Tue Mar  5 2024 Dave Dykstra <dwd@fedoraproject.org> - 1.20.12-1
+- Update to 1.20.12 by doing the equivalent changes done in RedHat ubi8's
+  golang-1.20.12-2
+- Restore the "--with ignore_tests" rpmbuild option
+
+* Thu Nov 23 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.20.10-3
+- Skip ppc64le_cgo_inline_plt test which is failing on el7.
+
+* Thu Nov 23 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.20.10-2
+- Rebuild to correct day of week on 1.19.13 changelog.
+
+* Thu Nov 23 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.20.10-1
+- Update to 1.20.10 by doing the equivalent changes done in RedHat ubi8.
+
+* Mon Oct 16 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.19.13-1
+- Update to 1.19.13 by doing the equivalent changes done in RedHat ubi8.
+
+* Thu Jun 29 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.19.10-1
+- Update to 1.19.10 by doing the equivalent changes done in RedHat ubi8.
+
+* Fri May 26 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.19.9-1
+- Update to 1.19.9 by doing the equivalent changes as centos8-stream.
+
+* Tue May 16 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.19.6-1
+- Update to 1.19.6 by doing the equivalent changes as centos8-stream.
+
+* Tue May 16 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.19.4-1
+- Update to 1.19.4 by doing the equivalent changes as centos8-stream.
 
 * Wed Jan 25 2023 Dave Dykstra <dwd@fedoraproject.org> - 1.18.9-1
 - Update to 1.18.9 by doing the equivalent changes as centos8-stream.
