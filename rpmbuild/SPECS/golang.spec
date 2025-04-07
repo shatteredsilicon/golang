@@ -100,6 +100,11 @@
 
 %global go_version %{go_api}%{?go_patch:.%{go_patch}}%{?go_prerelease:~%{go_prerelease}}
 %global go_source %{go_api}%{?go_patch:.%{go_patch}}%{?go_prerelease}
+
+%global go_fs_version 3.6.0
+
+#Fetch sources
+%undefine _disable_source_fetch
  
 Name:           golang
 Version:        %{go_version}
@@ -108,9 +113,10 @@ Summary:        The Go Programming Language
 # source tree includes several copies of Mark.Twain-Tom.Sawyer.txt under Public Domain
 License:        BSD-3-Clause AND LicenseRef-Fedora-Public-Domain
 URL:            https://go.dev
-Source0:        go%{go_source}.src.tar.gz
+Source0:        https://go.dev/dl/go%{go_source}.src.tar.gz
 # make possible to override default traceback level at build time by setting build tag rpm_crashtraceback
 Source1:        fedora.go
+Source2:	https://pagure.io/go-rpm-macros/archive/%{go_fs_version}/go-rpm-macros-%{go_fs_version}.tar.gz
 
 # The compiler is written in Go. Needs go(1.4+) compiler for build.
 %if !%{golang_bootstrap}
