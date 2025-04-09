@@ -96,7 +96,7 @@
 # Comment out go_prerelease and go_patch as needed
 %global go_api 1.24
 #global go_prerelease rc3
-%global go_patch 1
+%global go_patch 2
 
 %global go_version %{go_api}%{?go_patch:.%{go_patch}}%{?go_prerelease:~%{go_prerelease}}
 %global go_source %{go_api}%{?go_patch:.%{go_patch}}%{?go_prerelease}
@@ -565,6 +565,9 @@ fi
 %endif
 
 %changelog
+* Thu Apr 10 2025 Thien Nguyen <nthien86@gmail.com> - 1.24.2-2
+- Update to 1.24.2 upstream release
+
 * Mon Mar 31 2025 Thien Nguyen <nthien86@gmail.com> - 1.24.1-2
 - Disable failure on tests
 - Support build on EL7
