@@ -5,3 +5,11 @@ Since incremental version bootstrap for el7 is required, includes golang version
 - 1.20.12
 - 1.23.4
 - 1.24.1
+
+To build:
+```
+cd rpmbuild/SOURCES
+./prep-golang.sh
+cd ../SPECS
+rpmbuild -ba golang.spec
+```
