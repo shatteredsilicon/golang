@@ -91,16 +91,18 @@ override_dh_makeshlibs:
 override_dh_auto_build-arch:
 	# prepare
 	tar --strip-components=1 -zxf go${GO_VERSION}.src.tar.gz
-	tar -zxf llvm.tar.gz
 	@set -e; cd debian; for x in golang-X.Y-*; do \
 		sed -e 's/X.Y/$(GOVER)/g' $$x > golang-$(GOVER)-$${x##golang-X.Y-}; \
 	done
 
 	# rebuild race_xxx_xxx.syso lib files
-	cd $(CURDIR)/llvm-project-*/compiler-rt/lib/tsan/go \
-	&& ./buildgo.sh \
-	&& mv race_linux_*.syso $(CURDIR)/src/runtime/race/ \
-	&& cd $(CURDIR) && rm -rf llvm-project-*
+	if [ "$$(dpkg-architecture -qDEB_HOST_ARCH_CPU 2>/dev/null)" = 'arm64' ]; then \
+		cd $(CURDIR) && tar -zxf llvm.tar.gz; \
+		cd $(CURDIR)/llvm-project-*/compiler-rt/lib/tsan/go \
+			&& ./buildgo.sh \
+			&& mv race_linux_*.syso $(CURDIR)/src/runtime/race/; \
+		cd $(CURDIR) && rm -rf llvm-project-*; \
+	fi
 
 	cd $(CURDIR)/src \
 	&& $(CURDIR)/debian/helpers/goenv.sh bash ./make.bash --no-banner
