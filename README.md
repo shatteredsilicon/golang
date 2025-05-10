@@ -8,31 +8,31 @@ Since incremental version bootstrap for el7 is required, includes golang version
 
 #### Prerequisites
 
-- wget
-- tar
-- build-essential (for deb)
-- rpmdevtools (for rpm)
-
-And use following command to install prerequisites automatically for building
-
-##### RPM
-
-```
-yum-builddep rpmbuild/SPECS/golang.spec
-```
-
 ##### DEB
 
-```
-mk-build-deps --install debian/control
-```
+Use following commands to install prerequisites
 
 >
 > Tips: for debian 12- that doesn't have golang-1.22+ in default repos, you can use the bookworm-backport repo with:
 > `echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/sources.list.d/bookworm-backports.list` 
 >
 
-#### build
+```
+apt update
+apt install wget tar build-essential devscripts
+mk-build-deps --install debian/control
+```
+
+##### RPM
+
+Use following commands to install prerequisites
+
+```
+yum install wget tar rpmdevtools yum-utils
+yum-builddep rpmbuild/SPECS/golang.spec
+```
+
+#### Build
 
 Run
 ```
