@@ -11,7 +11,7 @@ if [ $PACK_DIST = 'deb' ]; then
         && DEBIAN_GO_VERSION=${GO_VERSION} dpkg-buildpackage -F -us -uc
 elif [ $PACK_DIST = 'rpm' ]; then
     cd rpmbuild;
-        rpmbuild -ba --define "_topdir `pwd`" SPECS/golang.spec
+        rpmbuild -ba --define "_topdir `pwd`" --define "upstream_version ${GO_VERSION}" SPECS/golang.spec
 else
     echo >&2 "error: unsupported dist: $PACK_DIST"; exit 1
 fi
