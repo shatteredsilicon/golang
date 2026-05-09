@@ -10,7 +10,7 @@ else
     DETECT_DIST=unknown
 fi
 
-GO_VERSION=${GO_VERSION:-1.24.2}
+GO_VERSION=${GO_VERSION:-1.26.3}
 PACK_DIST=${PACK_DIST:-$DETECT_DIST}
 
 # prepare

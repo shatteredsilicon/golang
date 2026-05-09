@@ -13,7 +13,7 @@ if [ $PACK_DIST = 'deb' ]; then
         wget https://go.dev/dl/go${GO_VERSION}.src.tar.gz -O go${GO_VERSION}.src.tar.gz \
         && wget https://github.com/llvm/llvm-project/archive/$(tar -xOf go${GO_VERSION}.src.tar.gz go/src/runtime/race/README | sed -rn "s/^race_linux_arm64\.syso .* LLVM ([a-z0-9]+).*/\1/p").tar.gz -O llvm.tar.gz
 elif [ $PACK_DIST = 'rpm' ]; then
-    rpmbuild/SOURCES/prep-golang.sh
+    rpmbuild/SOURCES/prep-golang.sh ${GO_VERSION}
 else
     echo >&2 "error: unsupported dist: $PACK_DIST"; exit 1
 fi
