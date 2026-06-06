@@ -56,10 +56,15 @@
 %endif
 
 # Controls what ever we fail on failed tests
+# Some SSL certificates are expired on EL7, causing crypto/tls tests to fail.
+%if 0%{?rhel} == 7
+%global fail_on_tests 0
+%else
 %if %{with ignore_tests}
 %global fail_on_tests 0
 %else
 %global fail_on_tests 1
+%endif
 %endif
 
 # Build golang shared objects for stdlib
@@ -118,7 +123,7 @@ Source1:        fedora.go
 %if !%{golang_bootstrap}
 BuildRequires:  gcc-go >= 5
 %else
-BuildRequires:  golang >= 1.22.6
+BuildRequires:  golang >= 1.24.6
 %endif
 BuildRequires:  hostname
 
@@ -249,7 +254,11 @@ Requires(preun): %{_sbindir}/update-alternatives
 # This is an odd issue, still looking for a better fix.
 Requires:       glibc
 Requires:       gcc
+%if 0%{?rhel} && 0%{?rhel} < 8
+Requires:       git, subversion, mercurial
+%else
 Recommends:     git-core
+%endif
 
 %description    bin
 %{summary}
