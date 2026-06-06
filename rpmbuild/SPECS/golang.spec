@@ -135,13 +135,14 @@ Provides: bundled(golang(golang.org/x/build)) = 0.0.0.20251128064159.b9bfd88b30e
 Provides: bundled(golang(golang.org/x/crypto)) = 0.46.1.0.20251210140736.7dacc380ba00
 Provides: bundled(golang(golang.org/x/mod)) = 0.30.1.0.20251115032019.269c237cf350
 Provides: bundled(golang(golang.org/x/net)) = 0.47.1.0.20251128220604.7c360367ab7e
+Provides: bundled(golang(golang.org/x/net)) = 0.47.1.0.20260417193450.705de46f8788
 Provides: bundled(golang(golang.org/x/sync)) = 0.19.0
 Provides: bundled(golang(golang.org/x/sys)) = 0.39.0
 Provides: bundled(golang(golang.org/x/telemetry)) = 0.0.0.20251128220624.abf20d0e57ec
 Provides: bundled(golang(golang.org/x/term)) = 0.38.0
 Provides: bundled(golang(golang.org/x/text)) = 0.32.0
 Provides: bundled(golang(golang.org/x/tools)) = 0.27.0
-Provides: bundled(golang(golang.org/x/tools)) = 0.39.1.0.20251230210517.d44be789a05c
+Provides: bundled(golang(golang.org/x/tools)) = 0.39.1.0.20260323181443.4f499ecaa91d
 Provides: bundled(golang(rsc.io/markdown)) = 0.0.0.20240306144322.0bf8f97ee8ef
 
 Requires:       %{name}-bin = %{version}-%{release}
@@ -150,8 +151,6 @@ Requires:       go-filesystem
 
 Patch1:         0001-Modify-go.env.patch
 Patch5:         0005-Skip-TestCrashDumpsAllThreads.patch
-# No require patch for ARM because issue is gone on GNU ld 2.36+
-# Patch6:         0006-Default-to-ld.bfd-on-ARM64.patch
 # Related to https://gcc.gnu.org/PR118497
 Patch8:         fix_cgo_panic-with-gcc15-in-368.patch
 # Related to https://github.com/golang/go/issues/74476
@@ -424,11 +423,6 @@ mkdir -p $RPM_BUILD_ROOT%{goroot}/bin/linux_%{gohostarch}
 ln -sf %{goroot}/bin/go $RPM_BUILD_ROOT%{goroot}/bin/linux_%{gohostarch}/go
 ln -sf %{goroot}/bin/gofmt $RPM_BUILD_ROOT%{goroot}/bin/linux_%{gohostarch}/gofmt
 
-# ensure these exist and are owned
-mkdir -p $RPM_BUILD_ROOT%{gopath}/src/github.com
-mkdir -p $RPM_BUILD_ROOT%{gopath}/src/bitbucket.org
-mkdir -p $RPM_BUILD_ROOT%{gopath}/src/code.google.com/p
-mkdir -p $RPM_BUILD_ROOT%{gopath}/src/golang.org/x
 echo "== 7 =="
 # make sure these files exist and point to alternatives
 rm -f $RPM_BUILD_ROOT%{_bindir}/go
@@ -507,17 +501,6 @@ fi
 %{goroot}/lib/time/
 %{goroot}/lib/wasm/
 %{goroot}/lib/fips140/
-
-# ensure directory ownership, so they are cleaned up if empty
-%dir %{gopath}
-%dir %{gopath}/src
-%dir %{gopath}/src/github.com/
-%dir %{gopath}/src/bitbucket.org/
-%dir %{gopath}/src/code.google.com/
-%dir %{gopath}/src/code.google.com/p/
-%dir %{gopath}/src/golang.org
-%dir %{gopath}/src/golang.org/x
-
 
 # gdbinit (for gdb debugging)
 %{_sysconfdir}/gdbinit.d
