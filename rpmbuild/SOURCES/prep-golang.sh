@@ -2,7 +2,7 @@
 
 set -e
 
-GO_VERSION="1.24.2"
+GO_VERSION="1.24.6"
 GO_FS_VERSION="3.6.0"
 
 rm -f *.tar.gz

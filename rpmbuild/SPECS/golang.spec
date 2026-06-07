@@ -96,7 +96,7 @@
 # Comment out go_prerelease and go_patch as needed
 %global go_api 1.24
 #global go_prerelease rc3
-%global go_patch 2
+%global go_patch 6
 
 %global go_version %{go_api}%{?go_patch:.%{go_patch}}%{?go_prerelease:~%{go_prerelease}}
 %global go_source %{go_api}%{?go_patch:.%{go_patch}}%{?go_prerelease}
@@ -183,9 +183,6 @@ Obsoletes:      golang-race < 1.20~rc3-2
 ExclusiveArch:  %{golang_arches}
 
 Source100:      golang-gdbinit
-%if 0%{?rhel} == 7
-Source101:      macros.golang
-%endif
 
 %description
 %{summary}.
@@ -450,13 +447,6 @@ ln -sf /etc/alternatives/gofmt $RPM_BUILD_ROOT%{_bindir}/gofmt
 mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/gdbinit.d
 cp -av %{SOURCE100} $RPM_BUILD_ROOT%{_sysconfdir}/gdbinit.d/golang.gdb
 
-%if 0%{?rhel} == 7
-# rpm macros
-mkdir -p %{buildroot}
-mkdir -p $RPM_BUILD_ROOT%{_rpmconfigdir}/macros.d
-cp -av %{SOURCE101} $RPM_BUILD_ROOT%{_rpmconfigdir}/macros.d/macros.golang
-%endif
-
 echo "== END OF INSTALL =="
 
 %check
@@ -522,6 +512,8 @@ fi
 %dir %{goroot}
 %{goroot}/api/
 %{goroot}/lib/time/
+%{goroot}/lib/wasm/
+%{goroot}/lib/fips140/
 
 # ensure directory ownership, so they are cleaned up if empty
 %dir %{gopath}
@@ -536,10 +528,6 @@ fi
 
 # gdbinit (for gdb debugging)
 %{_sysconfdir}/gdbinit.d
-
-%if 0%{?rhel} ==7
-%{_rpmconfigdir}/macros.d/macros.golang
-%endif
 
 %files src -f go-src.list
 
