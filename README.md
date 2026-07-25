@@ -6,6 +6,12 @@ Since incremental version bootstrap for el7 is required, includes golang version
 - 1.23.4
 - 1.24.1
 
+## Public key
+
+The non-secret RPM public key is stored in this repository for direct RPM
+signing and publication. The private key and passphrase remain protected by
+Jenkins credentials.
+
 #### Prerequisites
 
 ##### DEB
