@@ -1,0 +1,348 @@
+/* groovylint-disable LineLength, NestedBlockDepth */
+
+@Library('shatteredsilicon') _
+
+pipeline {
+  agent {
+    label "${params.ARCH == 'aarch64' ? 'rpm-aarch64' : 'rpm-x86_64'}"
+  }
+
+  parameters {
+    string(name: 'UPSTREAM_TAG', description: 'Upstream Go version, e.g. 1.26.3')
+    choice(name: 'EPEL', choices: ['10', '9', '8', '7'], description: 'EPEL release version')
+    choice(name: 'ARCH', choices: ['x86_64', 'aarch64'], description: 'Target architecture')
+    booleanParam(name: 'PUSH_TO_SS_MISC', defaultValue: true, description: 'Publish RPMs and source RPMs using the SS misc package signer workflow')
+    string(name: 'THREAD_TS', defaultValue: '', description: 'Slack parent thread timestamp for watcher-triggered notifications')
+  }
+
+  environment {
+    RPM_PACKAGE_SERVER_TARGET_CREDENTIALS_ID = 'rpm-package-server-target'
+    RPM_PACKAGE_SIGNER_HOST_CREDENTIALS_ID = 'rpm-package-signer-host'
+    RPM_PACKAGE_SIGNER_INBOX_CREDENTIALS_ID = 'rpm-package-signer-inbox-target'
+    RPM_PACKAGE_SIGNER_PATH_CREDENTIALS_ID = 'rpm-package-signer-path'
+    RPM_PACKAGE_SIGNER_CONFIG_CREDENTIALS_ID = 'rpm-package-signer-misc-config'
+    RPM_SIGNING_PRIVATE_KEY_CREDENTIALS_ID = 'rpm-signing-key-golang'
+    RPM_SIGNING_PASSPHRASE_CREDENTIALS_ID = 'rpm-signing-passphrase-golang'
+    RPM_SIGNING_PUBLIC_KEY = 'keys/RPM-GPG-KEY-golang.pub'
+    SLACK_WEBHOOK_CREDENTIALS_ID = 'slack-webhook-url'
+    SLACK_BOT_TOKEN_CREDENTIALS_ID = 'slack-bot-token'
+    SLACK_CHANNEL_ID_CREDENTIALS_ID = 'slack-channel-id'
+  }
+
+  options {
+    buildDiscarder(logRotator(
+      numToKeepStr: '3',
+      artifactNumToKeepStr: '3'
+    ))
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  stages {
+    stage('Initialize') {
+      steps {
+        script {
+          ci.validateRequiredParameters(
+            [UPSTREAM_TAG: params.UPSTREAM_TAG],
+            ['UPSTREAM_TAG']
+          )
+
+          String releaseTag = params.UPSTREAM_TAG.trim()
+            .replaceFirst(/^go/, '')
+            .replaceFirst(/^g/, '')
+          if (!(releaseTag ==~ /^[0-9]+\.[0-9]+(?:\.[0-9]+|(?:beta|rc)[0-9]+)$/)) {
+            error("UPSTREAM_TAG must be a Go version, for example 1.26.3; got '${params.UPSTREAM_TAG}'")
+          }
+
+          String releasever = (params.EPEL ?: '10').trim()
+          String basearch = (params.ARCH ?: 'x86_64').trim()
+          String mockTarget = releasever == '7'
+            ? "oraclelinux+go-7-${basearch}"
+            : "alma+epel-${releasever}-${basearch}"
+
+          org.shatteredsilicon.jenkins.model.BuildTarget target = rpm.resolveTarget(
+            release: releasever,
+            arch: basearch,
+            supportedReleases: ['7', '8', '9', '10'],
+            supportedArches: ['x86_64', 'aarch64'],
+            mockTarget: mockTarget
+          )
+
+          boolean publishToSsMisc = params.PUSH_TO_SS_MISC == null || params.PUSH_TO_SS_MISC
+          Map<String, String> externalConfiguration = [
+            SLACK_WEBHOOK_CREDENTIALS_ID: env.SLACK_WEBHOOK_CREDENTIALS_ID,
+            SLACK_BOT_TOKEN_CREDENTIALS_ID: env.SLACK_BOT_TOKEN_CREDENTIALS_ID,
+            SLACK_CHANNEL_ID_CREDENTIALS_ID: env.SLACK_CHANNEL_ID_CREDENTIALS_ID
+          ]
+
+          if (publishToSsMisc) {
+            externalConfiguration.putAll([
+              RPM_PACKAGE_SIGNER_HOST_CREDENTIALS_ID: env.RPM_PACKAGE_SIGNER_HOST_CREDENTIALS_ID,
+              RPM_PACKAGE_SIGNER_INBOX_CREDENTIALS_ID: env.RPM_PACKAGE_SIGNER_INBOX_CREDENTIALS_ID,
+              RPM_PACKAGE_SIGNER_PATH_CREDENTIALS_ID: env.RPM_PACKAGE_SIGNER_PATH_CREDENTIALS_ID,
+              RPM_PACKAGE_SIGNER_CONFIG_CREDENTIALS_ID: env.RPM_PACKAGE_SIGNER_CONFIG_CREDENTIALS_ID
+            ])
+          } else {
+            externalConfiguration.putAll([
+              RPM_PACKAGE_SERVER_TARGET_CREDENTIALS_ID: env.RPM_PACKAGE_SERVER_TARGET_CREDENTIALS_ID,
+              RPM_SIGNING_PRIVATE_KEY_CREDENTIALS_ID: env.RPM_SIGNING_PRIVATE_KEY_CREDENTIALS_ID,
+              RPM_SIGNING_PASSPHRASE_CREDENTIALS_ID: env.RPM_SIGNING_PASSPHRASE_CREDENTIALS_ID
+            ])
+          }
+          ci.validateRequiredParameters(externalConfiguration, externalConfiguration.keySet())
+
+          env.RELEASE_TAG = releaseTag
+          env.RELEASEVER = target.release
+          env.BASEARCH = target.arch
+          env.MOCK_TARGET_NAME = target.mockTarget
+          env.PUBLISH_MODE = publishToSsMisc ? 'ss-misc' : 'repository'
+        }
+        echo "Using upstream Go version: ${env.RELEASE_TAG}"
+        echo "Using EPEL release: ${env.RELEASEVER}"
+        echo "Using architecture: ${env.BASEARCH}"
+        echo "Using Mock target: ${env.MOCK_TARGET_NAME}"
+        echo "Using publication mode: ${env.PUBLISH_MODE}"
+      }
+    }
+
+    stage('Validate build node') {
+      steps {
+        script {
+          List<String> requiredCommands = ['mock', 'python3', 'rpmbuild', 'wget']
+          if (env.PUBLISH_MODE == 'ss-misc') {
+            requiredCommands.addAll(['base64', 'scp', 'ssh'])
+          } else {
+            requiredCommands.addAll(['gpg', 'jq', 'rpm', 'rpmsign', 'scp', 'ssh'])
+          }
+
+          ci.validateBuildNode(
+            expectedArchitecture: env.BASEARCH,
+            requiredCommands: requiredCommands,
+            mockTarget: env.MOCK_TARGET_NAME
+          )
+        }
+      }
+    }
+
+    stage('Prepare workspace') {
+      steps {
+        script {
+          ci.prepareWorkspace(
+            clean: ['work', 'artifacts'],
+            create: ['work', 'artifacts']
+          )
+        }
+        sh(
+          script: '''
+            set -euo pipefail
+
+            if [ "$PUBLISH_MODE" = 'repository' ]; then
+              test -s "$RPM_SIGNING_PUBLIC_KEY"
+            fi
+
+            cp -a rpmbuild work/rpmbuild
+          '''
+        )
+      }
+    }
+
+    stage('Prepare source') {
+      steps {
+        sh(
+          script: '''
+            set -euo pipefail
+            cd work/rpmbuild/SOURCES
+            chmod +x prep-golang.sh
+            ./prep-golang.sh "$RELEASE_TAG"
+          '''
+        )
+      }
+    }
+
+    stage('Build source RPM') {
+      steps {
+        script {
+          rpm.updateSpec(
+            specFile: 'work/rpmbuild/SPECS/golang.spec',
+            version: env.RELEASE_TAG,
+            versionMacro: 'upstream_version',
+            preserveVersionField: true
+          )
+        }
+
+        sh(
+          script: '''
+            set -euo pipefail
+            mkdir -p work/rpmbuild/BUILD work/rpmbuild/BUILDROOT work/rpmbuild/RPMS work/rpmbuild/SRPMS
+
+            rpmbuild -bs \
+              --define "_topdir $WORKSPACE/work/rpmbuild" \
+              --define "dist .el$RELEASEVER" \
+              work/rpmbuild/SPECS/golang.spec
+
+            find work/rpmbuild/SRPMS -maxdepth 1 -type f \
+              -name "golang-$RELEASE_TAG-*.src.rpm" \
+              -print -quit | grep -q .
+          '''
+        )
+      }
+    }
+
+    stage('Build RPM with Mock') {
+      steps {
+        script {
+          rpm.mockBuild(
+            mockTarget: env.MOCK_TARGET_NAME,
+            sourceRpm: "work/rpmbuild/SRPMS/golang-${env.RELEASE_TAG}-*.src.rpm",
+            artifactDirectory: 'artifacts',
+            artifactPatterns: [
+              "golang*-${env.RELEASE_TAG}-*.rpm",
+              '*.log',
+              '*.cfg',
+              '*.state'
+            ],
+            requiredArtifactPatterns: [
+              "golang-${env.RELEASE_TAG}-*.${env.BASEARCH}.rpm",
+              "golang-${env.RELEASE_TAG}-*.src.rpm"
+            ]
+          )
+        }
+      }
+    }
+
+    stage('Sign RPMs') {
+      when {
+        expression { env.PUBLISH_MODE == 'repository' }
+      }
+      steps {
+        script {
+          rpm.sign(
+            artifactsDirectory: 'artifacts',
+            privateKeyCredentialsId: env.RPM_SIGNING_PRIVATE_KEY_CREDENTIALS_ID,
+            passphraseCredentialsId: env.RPM_SIGNING_PASSPHRASE_CREDENTIALS_ID,
+            publicKeyFile: env.RPM_SIGNING_PUBLIC_KEY
+          )
+        }
+      }
+    }
+
+    stage('Publish RPMs') {
+      when {
+        expression { env.PUBLISH_MODE == 'repository' }
+      }
+      steps {
+        script {
+          rpm.publish(
+            targetCredentialsId: env.RPM_PACKAGE_SERVER_TARGET_CREDENTIALS_ID,
+            artifactsDirectory: 'artifacts',
+            destinations: [
+              [
+                include: '*.src.rpm',
+                remoteDirectory: "golang/${env.RELEASEVER}/SRPMS"
+              ],
+              [
+                include: '*.rpm',
+                exclude: ['*.src.rpm'],
+                remoteDirectory: "golang/${env.RELEASEVER}/RPMS/${env.BASEARCH}",
+                refreshMetadata: true
+              ]
+            ],
+            publicKey: [
+              file: env.RPM_SIGNING_PUBLIC_KEY,
+              remoteDirectory: 'golang'
+            ]
+          )
+        }
+      }
+    }
+
+    stage('Publish RPMs to SS misc') {
+      when {
+        expression { env.PUBLISH_MODE == 'ss-misc' }
+      }
+      steps {
+        script {
+          rpm.publishViaSigner(
+            artifactsDirectory: 'artifacts',
+            hostCredentialsId: env.RPM_PACKAGE_SIGNER_HOST_CREDENTIALS_ID,
+            inboxCredentialsId: env.RPM_PACKAGE_SIGNER_INBOX_CREDENTIALS_ID,
+            signerPathCredentialsId: env.RPM_PACKAGE_SIGNER_PATH_CREDENTIALS_ID,
+            signerConfigCredentialsId: env.RPM_PACKAGE_SIGNER_CONFIG_CREDENTIALS_ID
+          )
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      script {
+        ci.archiveDiagnostics(
+          directory: 'artifacts',
+          include: ['**/*'],
+          exclude: ['**/*.rpm'],
+          allowEmpty: true,
+          fingerprint: true
+        )
+
+        slackNotify(
+          status: 'success',
+          message: "Built and published Golang ${env.RELEASE_TAG} for EPEL ${env.RELEASEVER} / ${env.BASEARCH} using Mock target ${env.MOCK_TARGET_NAME} via ${env.PUBLISH_MODE}. Check Jenkins build: ${env.BUILD_URL}",
+          pipelineName: 'Golang RPM pipeline',
+          threadTs: params.THREAD_TS,
+          webhookCredentialsId: env.SLACK_WEBHOOK_CREDENTIALS_ID,
+          botTokenCredentialsId: env.SLACK_BOT_TOKEN_CREDENTIALS_ID,
+          channelIdCredentialsId: env.SLACK_CHANNEL_ID_CREDENTIALS_ID,
+          returnStdout: false
+        )
+      }
+    }
+
+    failure {
+      script {
+        ci.archiveDiagnostics(
+          directory: 'artifacts',
+          include: ['**/*'],
+          exclude: ['**/*.rpm'],
+          allowEmpty: true,
+          fingerprint: true
+        )
+
+        String releaseTag = (env.RELEASE_TAG ?: params.UPSTREAM_TAG ?: 'unknown').trim()
+        String releasever = (env.RELEASEVER ?: params.EPEL ?: 'unknown').trim()
+        String basearch = (env.BASEARCH ?: params.ARCH ?: 'unknown').trim()
+        String defaultMockTarget = releasever == '7'
+          ? "oraclelinux+go-7-${basearch}"
+          : "alma+epel-${releasever}-${basearch}"
+        String mockTarget = (env.MOCK_TARGET_NAME ?: defaultMockTarget).trim()
+        String publishMode = (env.PUBLISH_MODE ?: 'unknown').trim()
+        Map<String, String> slackCredentialIds = [
+          webhookCredentialsId: (env.SLACK_WEBHOOK_CREDENTIALS_ID ?: '').trim(),
+          botTokenCredentialsId: (env.SLACK_BOT_TOKEN_CREDENTIALS_ID ?: '').trim(),
+          channelIdCredentialsId: (env.SLACK_CHANNEL_ID_CREDENTIALS_ID ?: '').trim()
+        ]
+
+        if (slackCredentialIds.values().every { String value -> value }) {
+          slackNotify(
+            status: 'failure',
+            message: "Build failed for Golang ${releaseTag} for EPEL ${releasever} / ${basearch} using Mock target ${mockTarget} via ${publishMode}. Check Jenkins build: ${env.BUILD_URL}",
+            pipelineName: 'Golang RPM pipeline',
+            threadTs: params.THREAD_TS,
+            webhookCredentialsId: slackCredentialIds.webhookCredentialsId,
+            botTokenCredentialsId: slackCredentialIds.botTokenCredentialsId,
+            channelIdCredentialsId: slackCredentialIds.channelIdCredentialsId,
+            returnStdout: false
+          )
+        } else {
+          echo 'Slack failure notification skipped because credential IDs are not configured.'
+        }
+      }
+    }
+
+    cleanup {
+      script {
+        ci.cleanup(directories: ['work', 'artifacts'])
+      }
+    }
+  }
+}
