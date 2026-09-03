@@ -1,6 +1,0 @@
-# Ignore remote sources
-SOURCES/go*.src.tar.gz
-SOURCES/go-rpm-macros-*.tar.gz
-#Ignore outputs
-SRPMS/*
-RPMS/*

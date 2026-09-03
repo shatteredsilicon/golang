@@ -1,46 +1,44 @@
-Golang packaging for rhel and debian-based.
+### Setting up the CentOS 6 environment with Docker and build
 
-Since incremental version bootstrap for el7 is required, includes golang versions:
-- 1.18.9
-- 1.20.12
-- 1.23.4
-- 1.24.1
-
-## Public key
-
-The non-secret RPM public key is stored in this repository for direct RPM
-signing and publication. The private key and passphrase remain protected by
-Jenkins credentials.
-
-#### Prerequisites
-
-##### DEB
-
-Use following commands to install prerequisites
-
->
-> Tips: for debian 12- that doesn't have golang-1.22+ in default repos, you can use the bookworm-backport repo with:
-> `echo 'deb http://deb.debian.org/debian bookworm-backports main' > /etc/apt/sources.list.d/bookworm-backports.list` 
->
+Use Docker to setting up a CentOS 6 environemnt with following command:
 
 ```
-apt update
-apt install wget tar build-essential devscripts
-mk-build-deps --install debian/control
+docker run -it -d library/centos:6.10 bash
 ```
 
-##### RPM
-
-Use following commands to install prerequisites
+And run following commands inside the container:
 
 ```
-yum install wget tar rpmdevtools yum-utils
-yum-builddep rpmbuild/SPECS/golang.spec
+rm -f /etc/yum.repos.d/*.repo
+
+cat << 'EOF' > /etc/yum.repos.d/CentOS-Base.repo
+[base]
+name=CentOS-6.10 - Base Archive
+baseurl=https://archive.kernel.org/centos-vault/6.10/os/x86_64/
+gpgcheck=1
+gpgkey=https://archive.kernel.org/centos-vault/RPM-GPG-KEY-CentOS-6
+enabled=1
+
+[updates]
+name=CentOS-6.10 - Updates Archive
+baseurl=https://archive.kernel.org/centos-vault/6.10/updates/x86_64/
+gpgcheck=1
+gpgkey=https://archive.kernel.org/centos-vault/RPM-GPG-KEY-CentOS-6
+enabled=1
+
+[extras]
+name=CentOS-6.10 - Extras Archive
+baseurl=https://archive.kernel.org/centos-vault/6.10/extras/x86_64/
+gpgcheck=1
+gpgkey=https://archive.kernel.org/centos-vault/RPM-GPG-KEY-CentOS-6
+enabled=1
+EOF
+
+yum install -y git rpmdevtools yum-utils
+
+git clone -b el6 https://github.com/shatteredsilicon/golang.git ~/golang && cd ~/golang
+spectool -C ./rpmbuild/SOURCES -g golang.spec
+rpmbuild -ba --define "_topdir `pwd`/rpmbuild" golang.spec
 ```
 
-#### Build
-
-Run
-```
-./all.sh
-```
+And finally the golang package should be located in `~/golang/rpmbuild/RPMS/x86_64/golang-bin-1.26.8-1.el6.x86_64.rpm` if all these preceding commands were executed successfully.
