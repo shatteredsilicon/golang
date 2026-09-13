@@ -1,0 +1,9 @@
+# Downloaded source archives
+SOURCES/go*.src.tar.gz
+SOURCES/go*.linux-amd64.tar.gz
+
+# RPM build outputs
+BUILD/
+BUILDROOT/
+RPMS/
+SRPMS/
