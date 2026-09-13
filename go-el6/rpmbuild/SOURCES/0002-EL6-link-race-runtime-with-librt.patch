@@ -1,0 +1,14 @@
+--- a/src/runtime/race/race.go
++++ b/src/runtime/race/race.go
+@@ -14,7 +14,10 @@ package race
+ // On darwin we always use system DLLs to create threads,
+ // so we use race_darwin_$GOARCH.go to provide the syso-derived
+ // symbol information without needing to invoke cgo.
+ // This allows -race to be used on Mac systems without a C toolchain.
+ 
+-// void __race_unused_func(void);
++/*
++#cgo linux LDFLAGS: -lrt
++void __race_unused_func(void);
++*/
+ import "C"
