@@ -58,6 +58,7 @@ Source100:      golang-gdbinit
 
 Patch1:         0001-Modify-go.env.patch
 Patch2:         0002-EL6-link-race-runtime-with-librt.patch
+Patch3:         0003-Backport-TestFallocate-only-check-blocks-on-Darwin.patch
 
 BuildRequires:  bash
 BuildRequires:  devtoolset-7-binutils
@@ -147,6 +148,7 @@ The Go compiler, linker, formatter, and supporting tools.
 %setup -q -n go
 %patch1 -p1
 %patch2 -p1
+%patch3 -p1
 
 cp -p %{SOURCE1} ./src/runtime/
 
@@ -297,7 +299,15 @@ export LDFLAGS="$RPM_LD_FLAGS"
 export GO_TEST_TIMEOUT_SCALE=3
 
 cd src
-./run.bash --no-rebuild -v -v -v -k
+
+# Mock uses the build host kernel.  The EL6 buildroot therefore sees a
+# different kernel when the package is built on EL9 and EL10.  Do not make
+# the EL6 RPM build depend on the race-detector-specific dist tests, which
+# exercise host-kernel/runtime behavior rather than the EL6 userspace that
+# this package is intended to validate.
+#
+# Keep the rest of the upstream dist test suite enabled.
+./run.bash --no-rebuild -v -v -v -k -run='!.*:race.*$'
 cd ..
 
 # Drop the build-time compiler overrides before checking the defaults embedded

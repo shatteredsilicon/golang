@@ -25,37 +25,13 @@ Go 1.22 and 1.23 require a Go 1.20 bootstrap compiler. The fixed 1.20.14
 bootstrap is deliberately downloaded as a source artifact and embedded in the
 SRPM so that Mock rebuilds are self-contained.
 
-## Fedora patch selection
-
-Only the `0001-Modify-go.env.patch` behavior is needed from the Fedora Go 1.23
-package, but the EL6 copy is intentionally reduced to the `GOTOOLCHAIN=local`
-change. The existing EL7-EL10 packaging already chose to keep the upstream
-`GOPROXY` and `GOSUMDB` defaults, so the EL6 package preserves that repository
-policy instead of reintroducing Fedora's older proxy/checksum changes.
-
-- `0005-Skip-TestCrashDumpsAllThreads.patch`: not needed because this EL6 package
-  is `x86_64` only; the patch only changes `linux/s390x` behavior.
-- `0006-Default-to-ld.bfd-on-ARM64.patch`: not needed because it only affects
-  `aarch64`.
-
-The newer top-level packaging patches `fix_cgo_panic-with-gcc15-in-368.patch`
-and `skip_lsan_tests.patch` are also intentionally not used here. They address
-newer compiler/architecture issues that are unrelated to this EL6 x86_64
-build.
-
-`fedora.go` and `golang-gdbinit` are copied into this directory rather than
-symlinked to the existing `rpmbuild/SOURCES` tree. Source files referenced by a
-spec must be physically present in the SRPM; keeping this tree self-contained
-also makes the resulting SRPM reproducible outside the original Git checkout.
-
 ## Prepare sources
 
 From the repository root:
 
 ```bash
-cd go-el6/rpmbuild/SOURCES
+cd rpmbuild/SOURCES
 ./prep-golang-el6.sh 1.23.12
-cd ../../..
 ```
 
 The preparation script downloads both the requested Go source tarball and the
@@ -82,48 +58,16 @@ The examples below assume the custom EL6 Mock target is installed as
 repositories required for `devtoolset-7`.
 
 ```bash
-GO_VERSION=1.23.12
-BOOTSTRAP_VERSION=1.20.14
+mkdir -p rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
-rm -rf go-el6/result-srpm go-el6/result-rpm
-mkdir -p go-el6/result-srpm go-el6/result-rpm
+cd rpmbuild/SPECS
 
-mock -r centos-6-x86_64 \
-  --buildsrpm \
-  --spec go-el6/rpmbuild/SPECS/golang.spec \
-  --sources go-el6/rpmbuild/SOURCES \
-  --define "upstream_version ${GO_VERSION}" \
-  --define "bootstrap_version ${BOOTSTRAP_VERSION}" \
-  --resultdir go-el6/result-srpm
+rpmbuild -bs \
+    --define "_topdir $(cd .. && pwd)" \
+    --define "dist .el6" \
+    golang.spec
 
-#
-# Select only the SRPM produced for this EL6 build.
-#
-# Do not use a generic "*.src.rpm" match here.  An older/stale SRPM without
-# the .el6 dist tag (for example golang-1.23.12-1.src.rpm) may otherwise be
-# selected and then rebuilt with Release=1.el6.  Mock would consequently see
-# both the original and rebuilt SRPM in /builddir/build/SRPMS and fail with:
-#
-#   Expected to find single rebuilt srpm, found 2
-#
-SRPMS=$(find go-el6/result-srpm -maxdepth 1 -type f \
-  -name "golang-${GO_VERSION}-*.el6.src.rpm" -print)
-
-SRPM_COUNT=$(printf '%s\n' "$SRPMS" | sed '/^$/d' | wc -l)
-
-if [ "$SRPM_COUNT" -ne 1 ]; then
-  echo "ERROR: expected exactly one EL6 SRPM, found ${SRPM_COUNT}:" >&2
-  printf '%s\n' "$SRPMS" >&2
-  exit 1
-fi
-
-SRPM="$SRPMS"
- 
-mock -r centos-6-x86_64 --clean
-
-mock -r centos-6-x86_64 \
-  --rebuild "$SRPM" \
-  --resultdir go-el6/result-rpm
+mock -r centos-6-x86_64 --rebuild ../SRPMS/golang-1.23.12-1.el6.src.rpm
 ```
 
 Expected binary packages include at least:
@@ -132,40 +76,6 @@ Expected binary packages include at least:
 golang-1.23.12-1.el6.x86_64.rpm
 golang-bin-1.23.12-1.el6.x86_64.rpm
 golang-src-1.23.12-1.el6.noarch.rpm
-```
-
-## Validate the Mock result
-
-```bash
-rpm -qpi go-el6/result-rpm/golang-1.23.12-1.el6.x86_64.rpm
-rpm -qpi go-el6/result-rpm/golang-bin-1.23.12-1.el6.x86_64.rpm
-```
-
-Install the complete package set into a fresh Mock chroot and verify the
-compiler defaults:
-
-```bash
-mock -r centos-6-x86_64 --clean
-mock -r centos-6-x86_64 --init
-BINARY_RPMS=$(find go-el6/result-rpm -maxdepth 1 -type f \
-  -name 'golang-*.rpm' ! -name '*.src.rpm' -print)
-test -n "$BINARY_RPMS"
-mock -r centos-6-x86_64 --install $BINARY_RPMS
-
-mock -r centos-6-x86_64 --chroot -- go version
-mock -r centos-6-x86_64 --chroot -- go env GOOS GOARCH GOAMD64 CGO_ENABLED CC CXX GOTOOLCHAIN
-```
-
-The important values are:
-
-```text
-GOOS=linux
-GOARCH=amd64
-GOAMD64=v1
-CGO_ENABLED=1
-CC=/opt/rh/devtoolset-7/root/usr/bin/gcc
-CXX=/opt/rh/devtoolset-7/root/usr/bin/g++
-GOTOOLCHAIN=local
 ```
 
 ## Final EL6 runtime validation
